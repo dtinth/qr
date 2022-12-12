@@ -40,43 +40,74 @@ interface DisplayedInfo {
 function Scanner() {
   const video = useRef<HTMLVideoElement>(null)
   const requested = useRef<boolean>(false)
+  const [stopped, setStopped] = useState<boolean>(false)
   const [displayedInfo, setDisplayedInfo] = useState<DisplayedInfo | null>(null)
   useEffect(() => {
+    if (stopped) {
+      requested.current = false
+      return
+    }
     if (requested.current) return
     requested.current = true
-    reader.decodeFromVideoDevice(undefined, video.current!, (result, err) => {
-      if (result) {
-        const data = JSON.parse(JSON.stringify(result))
-        console.log(data)
-        if (options.post === 'opener') {
-          window.opener.postMessage(data, '*')
-        } else if (options.post === 'parent') {
-          window.parent.postMessage(data, '*')
-        } else {
-          setDisplayedInfo({
-            text: data.text,
-            variant: 'success',
-          })
+    const showError = (error: any) => {
+      setDisplayedInfo({
+        text: String(error),
+        variant: 'error',
+      })
+    }
+    reader
+      .decodeFromVideoDevice(undefined, video.current!, (result, err) => {
+        if (result) {
+          const data = JSON.parse(JSON.stringify(result))
+          console.log(data)
+          if (options.post === 'opener') {
+            window.opener.postMessage(data, '*')
+          } else if (options.post === 'parent') {
+            window.parent.postMessage(data, '*')
+          } else {
+            setDisplayedInfo({
+              text: data.text,
+              variant: 'success',
+            })
+          }
+        } else if (err instanceof NotFoundException) {
+          // expected
+        } else if (err instanceof ChecksumException) {
+          // expected
+        } else if (err instanceof FormatException) {
+          // expected
+        } else if (err) {
+          console.error(err)
+          showError(err)
+          setStopped(true)
         }
-      } else if (err instanceof NotFoundException) {
-        // expected
-      } else if (err instanceof ChecksumException) {
-        // expected
-      } else if (err instanceof FormatException) {
-        // expected
-      } else if (err) {
+      })
+      .catch((err) => {
         console.error(err)
-      }
-    })
-  }, [])
+        showError(err)
+        setStopped(true)
+      })
+  }, [stopped])
   return (
     <div>
-      <video
-        ref={video}
-        className={clsx('fixed top-0 left-0 w-screen h-screen', {
-          'object-cover': options.fit === 'cover',
-        })}
-      />
+      {stopped ? (
+        <div className="fixed inset-0 flex items-center justify-center">
+          <button
+            className="py-3 px-4 bg-gray-800 rounded-lg font-bold"
+            onClick={() => setStopped(false)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <video
+          ref={video}
+          className={clsx('fixed top-0 left-0 w-screen h-screen', {
+            'object-cover': options.fit === 'cover',
+          })}
+        />
+      )}
+
       {!!displayedInfo && (
         <div
           className={clsx('fixed top-0 left-0 right-0 text-white flex', {
