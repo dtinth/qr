@@ -1,4 +1,4 @@
-import { BrowserQRCodeReader } from '@zxing/browser'
+import { BrowserMultiFormatReader } from '@zxing/browser'
 import {
   ChecksumException,
   FormatException,
@@ -19,7 +19,7 @@ const options = {
 }
 const action = params.get('action') || 'home'
 
-const reader = new BrowserQRCodeReader(undefined, {
+const reader = new BrowserMultiFormatReader(undefined, {
   delayBetweenScanAttempts: options.delay,
 })
 
