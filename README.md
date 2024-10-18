@@ -1,6 +1,6 @@
 # qr.spacet.me
 
-A popup QR code scanner that can be easily integrated into a web app. Powered by [@zxing/browser](https://www.npmjs.com/package/@zxing/browser).
+A popup QR code scanner that can be easily integrated into a web app. Powered by [@zxing/browser](https://www.npmjs.com/package/@zxing/browser) and browser’s built-in [BarcodeDetector API](https://developer.mozilla.org/en-US/docs/Web/API/BarcodeDetector) (if available). Both detectors are used to maximize the chance of successful scanning.
 
 **Try it in your JavaScript console.** Copy the following code and paste it into your browser's console.
 
