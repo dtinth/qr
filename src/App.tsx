@@ -1,15 +1,15 @@
+import { Icon } from '@iconify-icon/react'
+import checkIcon from '@iconify-icons/codicon/check'
+import closeIcon from '@iconify-icons/codicon/close'
+import copyIcon from '@iconify-icons/codicon/copy'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import {
   ChecksumException,
   FormatException,
   NotFoundException,
 } from '@zxing/library'
-import { useEffect, useRef, useState } from 'react'
-import { Icon } from '@iconify-icon/react'
-import closeIcon from '@iconify-icons/codicon/close'
-import copyIcon from '@iconify-icons/codicon/copy'
-import checkIcon from '@iconify-icons/codicon/check'
 import clsx from 'clsx'
+import { useEffect, useRef, useState } from 'react'
 
 const params = new URLSearchParams(window.location.search)
 const options = {
@@ -55,20 +55,73 @@ function Scanner() {
         variant: 'error',
       })
     }
+    let lastResult: { time: number; text: string } | null = null
+    const handleResult = (data: { text: string }, source: string) => {
+      if (
+        lastResult &&
+        lastResult.text === data.text &&
+        lastResult.time > Date.now() - 1000
+      ) {
+        console.warn(
+          '[QR scanned] Ignored duplicate scan:',
+          data,
+          'from',
+          source,
+        )
+        return
+      }
+      lastResult = { time: Date.now(), text: data.text }
+      console.log('[QR scanned]', data, 'from', source)
+      if (options.post === 'opener') {
+        window.opener.postMessage(data, '*')
+      } else if (options.post === 'parent') {
+        window.parent.postMessage(data, '*')
+      } else {
+        setDisplayedInfo({
+          text: data.text,
+          variant: 'success',
+        })
+      }
+    }
+    if ('BarcodeDetector' in window) {
+      const barcodeDetectionWorker = async () => {
+        const w = window as unknown as {
+          BarcodeDetector: {
+            new (): {
+              detect(image: ImageBitmapSource): Promise<
+                {
+                  rawValue: string
+                }[]
+              >
+            }
+          }
+        }
+        const barcodeDetector = new w.BarcodeDetector()
+        for (;;) {
+          try {
+            if (video.current && video.current.videoWidth) {
+              const barcodes = await barcodeDetector.detect(video.current)
+              for (const barcode of barcodes) {
+                if (barcode.rawValue)
+                  handleResult({ text: barcode.rawValue }, 'native')
+              }
+            }
+          } catch (e) {
+            console.error('[BarcodeDetector]', e)
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+          } finally {
+            await new Promise((resolve) => setTimeout(resolve, 50))
+          }
+        }
+      }
+      barcodeDetectionWorker()
+    }
     reader
       .decodeFromVideoDevice(undefined, video.current!, (result, err) => {
         if (result) {
           const data = JSON.parse(JSON.stringify(result))
-          console.log(data)
-          if (options.post === 'opener') {
-            window.opener.postMessage(data, '*')
-          } else if (options.post === 'parent') {
-            window.parent.postMessage(data, '*')
-          } else {
-            setDisplayedInfo({
-              text: data.text,
-              variant: 'success',
-            })
+          if (data.text) {
+            handleResult(data, 'zxing')
           }
         } else if (err instanceof NotFoundException) {
           // expected
