@@ -14,6 +14,9 @@ importers:
       '@iconify-icons/codicon':
         specifier: ^1.2.20
         version: 1.2.30
+      '@iconify-icons/lucide':
+        specifier: ^1.2.135
+        version: 1.2.135
       '@zxing/browser':
         specifier: ^0.1.1
         version: 0.1.5(@zxing/library@0.19.3)
@@ -286,6 +289,9 @@ packages:
 
   '@iconify-icons/codicon@1.2.30':
     resolution: {integrity: sha512-rLQFx8nFu0RwP4BFPr4ELooaubDzWUb+6tB2knHPyHYEL8Jfus8ysJ5i26H1Wr9CbtlKu/B2Tx+57otwqhFLqw==}
+
+  '@iconify-icons/lucide@1.2.135':
+    resolution: {integrity: sha512-t2Dya1a+PInBmHScbbGyseze7rrGHRW/dYF4GTR6f51N08sCg6KrtE4zmplnZE1ul2NyC+sxKpXRCv48hEgaQw==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -1058,6 +1064,10 @@ snapshots:
       react: 18.3.1
 
   '@iconify-icons/codicon@1.2.30':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-icons/lucide@1.2.135':
     dependencies:
       '@iconify/types': 2.0.0
 

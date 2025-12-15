@@ -2,9 +2,9 @@ import { Icon } from '@iconify-icon/react'
 import checkIcon from '@iconify-icons/codicon/check'
 import closeIcon from '@iconify-icons/codicon/close'
 import copyIcon from '@iconify-icons/codicon/copy'
-import cameraIcon from '@iconify-icons/codicon/device-camera-video'
-import flashIcon from '@iconify-icons/codicon/lightbulb'
-import uploadIcon from '@iconify-icons/codicon/cloud-upload'
+import cameraIcon from '@iconify-icons/lucide/refresh-ccw'
+import flashIcon from '@iconify-icons/lucide/flashlight'
+import uploadIcon from '@iconify-icons/lucide/image'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import {
   ChecksumException,
@@ -413,19 +413,6 @@ function Scanner() {
       {!stopped && (
         <>
           <div className="fixed bottom-4 left-4 flex gap-2 items-end">
-            {torchAvailable && (
-              <button
-                className={clsx(
-                  'bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80 flex items-center gap-1',
-                  torchEnabled && 'bg-amber-500 hover:bg-amber-600',
-                )}
-                onClick={handleTorchToggle}
-                title="Toggle flashlight"
-              >
-                <Icon inline icon={flashIcon} />
-                <span className="sr-only">Toggle flashlight</span>
-              </button>
-            )}
             {cameras.length > 1 && (
               <div className="relative">
                 <button
@@ -457,6 +444,19 @@ function Scanner() {
                   </div>
                 )}
               </div>
+            )}
+            {torchAvailable && (
+              <button
+                className={clsx(
+                  'bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80 flex items-center gap-1',
+                  torchEnabled && 'text-amber-300',
+                )}
+                onClick={handleTorchToggle}
+                title="Toggle flashlight"
+              >
+                <Icon inline icon={flashIcon} />
+                <span className="sr-only">Toggle flashlight</span>
+              </button>
             )}
           </div>
           <div className="fixed bottom-4 right-4">
