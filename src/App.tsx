@@ -23,6 +23,7 @@ const reader = new BrowserMultiFormatReader(undefined, {
   delayBetweenScanAttempts: options.delay,
 })
 const imageReader = new BrowserMultiFormatReader()
+const DUPLICATE_WINDOW_MS = 1000
 
 function App() {
   if (action === 'scan') {
@@ -36,6 +37,15 @@ interface DisplayedInfo {
   text: string
   variant: 'success' | 'error'
   copied?: boolean
+}
+
+type TorchSettings = MediaTrackSettings & { torch?: boolean }
+type TorchConstraints = MediaTrackConstraints & {
+  advanced?: ({ torch?: boolean } & MediaTrackConstraintSet)[]
+}
+type ZXingResult = { text?: string; getText?: () => string }
+type BarcodeDetectorCtor = new () => {
+  detect(image: ImageBitmapSource): Promise<{ rawValue: string }[]>
 }
 
 function Scanner() {
@@ -52,8 +62,12 @@ function Scanner() {
   const [stopped, setStopped] = useState<boolean>(false)
   const [displayedInfo, setDisplayedInfo] = useState<DisplayedInfo | null>(null)
   const resetReader = () => {
-    ;(reader as any).reset?.()
-    ;(reader as any).stopContinuousDecode?.()
+    const r = reader as BrowserMultiFormatReader & {
+      reset?: () => void
+      stopContinuousDecode?: () => void
+    }
+    r.reset?.()
+    r.stopContinuousDecode?.()
   }
   const showError = (error: any) => {
     setDisplayedInfo({
@@ -65,7 +79,7 @@ function Scanner() {
     if (
       lastResultRef.current &&
       lastResultRef.current.text === data.text &&
-      lastResultRef.current.time > Date.now() - 1000
+      lastResultRef.current.time > Date.now() - DUPLICATE_WINDOW_MS
     ) {
       console.warn('[QR scanned] Ignored duplicate scan:', data, 'from', source)
       return
@@ -89,6 +103,11 @@ function Scanner() {
     setTorchAvailable(false)
     setTorchEnabled(false)
   }
+
+  const getBarcodeDetector = (): BarcodeDetectorCtor | undefined => {
+    const w = window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }
+    return w.BarcodeDetector
+  }
   useEffect(() => {
     const enumerateCameras = async () => {
       try {
@@ -103,21 +122,11 @@ function Scanner() {
     }
 
     const startBarcodeDetector = () => {
-      if (!('BarcodeDetector' in window)) return () => {}
+      const Detector = getBarcodeDetector()
+      if (!Detector) return () => {}
       let cancelled = false
       const barcodeDetectionWorker = async () => {
-        const w = window as unknown as {
-          BarcodeDetector: {
-            new (): {
-              detect(image: ImageBitmapSource): Promise<
-                {
-                  rawValue: string
-                }[]
-              >
-            }
-          }
-        }
-        const barcodeDetector = new w.BarcodeDetector()
+        const barcodeDetector = new Detector()
         while (!cancelled) {
           try {
             if (video.current && video.current.videoWidth) {
@@ -151,9 +160,14 @@ function Scanner() {
             streamRef.current = stream
             const track = stream.getVideoTracks()[0]
             if (track) {
-              const settings = track.getSettings() as { torch?: boolean }
-              setTorchAvailable(settings?.torch !== undefined)
-              setTorchEnabled(Boolean(settings?.torch))
+              const settings = track.getSettings() as TorchSettings
+              if ('torch' in settings) {
+                setTorchAvailable(true)
+                setTorchEnabled(Boolean(settings?.torch))
+              } else {
+                setTorchAvailable(false)
+                setTorchEnabled(false)
+              }
             }
             enumerateCameras()
           }
@@ -204,9 +218,10 @@ function Scanner() {
     if (!track || !torchAvailable) return
     const enable = !torchEnabled
     try {
-      await track.applyConstraints({
-        advanced: [{ torch: enable } as MediaTrackConstraintSet],
-      } as MediaTrackConstraints)
+      const constraints: TorchConstraints = {
+        advanced: [{ torch: enable }],
+      }
+      await track.applyConstraints(constraints)
       setTorchEnabled(enable)
     } catch (error) {
       console.error(error)
@@ -223,26 +238,16 @@ function Scanner() {
       found = true
       handleResult({ text }, source)
     }
-    if ('BarcodeDetector' in window) {
+    const Detector = getBarcodeDetector()
+    if (Detector) {
       try {
         const bitmap = await createImageBitmap(file)
-        const w = window as unknown as {
-          BarcodeDetector: {
-            new (): {
-              detect(image: ImageBitmapSource): Promise<
-                {
-                  rawValue: string
-                }[]
-              >
-            }
-          }
-        }
-        const barcodeDetector = new w.BarcodeDetector()
+        const barcodeDetector = new Detector()
         const barcodes = await barcodeDetector.detect(bitmap)
         for (const barcode of barcodes) {
           if (barcode.rawValue) handleText(barcode.rawValue, 'native-image')
         }
-        bitmap.close?.()
+        bitmap.close()
       } catch (error) {
         console.error('[BarcodeDetector][image]', error)
       }
@@ -262,10 +267,12 @@ function Scanner() {
           }
           element.src = objectUrl
         })
-        const result = await imageReader.decodeFromImageElement(img)
-        const data = JSON.parse(JSON.stringify(result))
-        if (data?.text) {
-          handleText(data.text, 'zxing-image')
+        const result = (await imageReader.decodeFromImageElement(
+          img,
+        )) as unknown as ZXingResult
+        const text = result.getText?.() ?? result.text
+        if (text && text.trim()) {
+          handleText(text, 'zxing-image')
         }
       } catch (error) {
         if (
@@ -309,9 +316,8 @@ function Scanner() {
         handleFiles(files)
       }
     }
-    const listener: EventListener = onPaste as unknown as EventListener
-    document.addEventListener('paste', listener)
-    return () => document.removeEventListener('paste', listener)
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
   }, [])
   return (
     <div>
@@ -358,6 +364,8 @@ function Scanner() {
               'object-cover': options.fit === 'cover',
               'object-contain': options.fit !== 'cover',
             })}
+            aria-label="QR code scanner camera feed"
+            role="img"
             playsInline
             autoPlay
             muted
