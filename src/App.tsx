@@ -2,6 +2,9 @@ import { Icon } from '@iconify-icon/react'
 import checkIcon from '@iconify-icons/codicon/check'
 import closeIcon from '@iconify-icons/codicon/close'
 import copyIcon from '@iconify-icons/codicon/copy'
+import cameraIcon from '@iconify-icons/codicon/device-camera-video'
+import flashIcon from '@iconify-icons/codicon/lightbulb'
+import uploadIcon from '@iconify-icons/codicon/cloud-upload'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import {
   ChecksumException,
@@ -408,51 +411,33 @@ function Scanner() {
       )}
 
       {!stopped && (
-        <div className="fixed top-4 right-4 flex flex-col gap-2 items-end">
-          <div className="flex gap-2">
+        <>
+          <div className="fixed bottom-4 left-4 flex gap-2 items-end">
             {torchAvailable && (
               <button
                 className={clsx(
-                  'bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80',
+                  'bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80 flex items-center gap-1',
                   torchEnabled && 'bg-amber-500 hover:bg-amber-600',
                 )}
                 onClick={handleTorchToggle}
                 title="Toggle flashlight"
               >
-                {torchEnabled ? 'Torch on' : 'Torch'}
+                <Icon inline icon={flashIcon} />
+                <span className="sr-only">Toggle flashlight</span>
               </button>
             )}
-            <button
-              className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80"
-              onClick={() => fileInput.current?.click()}
-              title="Scan from image"
-            >
-              Upload
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                if (event.target.files) {
-                  handleFiles(event.target.files)
-                  event.target.value = ''
-                }
-              }}
-            />
             {cameras.length > 1 && (
               <div className="relative">
                 <button
-                  className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80"
+                  className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80 flex items-center gap-1"
                   onClick={() => setCameraMenuOpen((v) => !v)}
                   title="Switch camera"
                 >
-                  Camera
+                  <Icon inline icon={cameraIcon} />
+                  <span className="sr-only">Switch camera</span>
                 </button>
                 {cameraMenuOpen && (
-                  <div className="absolute right-0 mt-2 bg-black/80 text-white rounded-lg shadow-lg overflow-hidden min-w-[200px]">
+                  <div className="absolute left-0 bottom-12 bg-black/80 text-white rounded-lg shadow-lg overflow-hidden min-w-[200px]">
                     {cameras.map((camera) => (
                       <button
                         key={camera.deviceId}
@@ -474,10 +459,30 @@ function Scanner() {
               </div>
             )}
           </div>
-          <div className="text-xs text-white/80 bg-black/40 rounded-full px-3 py-1 backdrop-blur">
-            Tip: drag &amp; drop or paste images to scan
+          <div className="fixed bottom-4 right-4">
+            <button
+              className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80 flex items-center gap-1"
+              onClick={() => fileInput.current?.click()}
+              title="Scan from image"
+            >
+              <Icon inline icon={uploadIcon} />
+              <span className="sr-only">Upload image to scan</span>
+            </button>
           </div>
-        </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              if (event.target.files) {
+                handleFiles(event.target.files)
+                event.target.value = ''
+              }
+            }}
+          />
+        </>
       )}
 
       {dragActive && (
