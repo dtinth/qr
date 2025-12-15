@@ -22,6 +22,7 @@ const action = params.get('action') || 'home'
 const reader = new BrowserMultiFormatReader(undefined, {
   delayBetweenScanAttempts: options.delay,
 })
+const imageReader = new BrowserMultiFormatReader()
 
 function App() {
   if (action === 'scan') {
@@ -39,51 +40,71 @@ interface DisplayedInfo {
 
 function Scanner() {
   const video = useRef<HTMLVideoElement>(null)
-  const requested = useRef<boolean>(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const lastResultRef = useRef<{ time: number; text: string } | null>(null)
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | undefined>()
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(false)
+  const [torchAvailable, setTorchAvailable] = useState(false)
+  const [torchEnabled, setTorchEnabled] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const [stopped, setStopped] = useState<boolean>(false)
   const [displayedInfo, setDisplayedInfo] = useState<DisplayedInfo | null>(null)
-  useEffect(() => {
-    if (stopped) {
-      requested.current = false
+  const resetReader = () => {
+    ;(reader as any).reset?.()
+    ;(reader as any).stopContinuousDecode?.()
+  }
+  const showError = (error: any) => {
+    setDisplayedInfo({
+      text: String(error),
+      variant: 'error',
+    })
+  }
+  const handleResult = (data: { text: string }, source: string) => {
+    if (
+      lastResultRef.current &&
+      lastResultRef.current.text === data.text &&
+      lastResultRef.current.time > Date.now() - 1000
+    ) {
+      console.warn('[QR scanned] Ignored duplicate scan:', data, 'from', source)
       return
     }
-    if (requested.current) return
-    requested.current = true
-    const showError = (error: any) => {
+    lastResultRef.current = { time: Date.now(), text: data.text }
+    console.log('[QR scanned]', data, 'from', source)
+    if (options.post === 'opener') {
+      window.opener.postMessage(data, '*')
+    } else if (options.post === 'parent') {
+      window.parent.postMessage(data, '*')
+    } else {
       setDisplayedInfo({
-        text: String(error),
-        variant: 'error',
+        text: data.text,
+        variant: 'success',
       })
     }
-    let lastResult: { time: number; text: string } | null = null
-    const handleResult = (data: { text: string }, source: string) => {
-      if (
-        lastResult &&
-        lastResult.text === data.text &&
-        lastResult.time > Date.now() - 1000
-      ) {
-        console.warn(
-          '[QR scanned] Ignored duplicate scan:',
-          data,
-          'from',
-          source,
+  }
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setTorchAvailable(false)
+    setTorchEnabled(false)
+  }
+  useEffect(() => {
+    const enumerateCameras = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoInputs = devices.filter(
+          (device) => device.kind === 'videoinput',
         )
-        return
-      }
-      lastResult = { time: Date.now(), text: data.text }
-      console.log('[QR scanned]', data, 'from', source)
-      if (options.post === 'opener') {
-        window.opener.postMessage(data, '*')
-      } else if (options.post === 'parent') {
-        window.parent.postMessage(data, '*')
-      } else {
-        setDisplayedInfo({
-          text: data.text,
-          variant: 'success',
-        })
+        setCameras(videoInputs)
+      } catch (error) {
+        console.error('[enumerateDevices]', error)
       }
     }
-    if ('BarcodeDetector' in window) {
+
+    const startBarcodeDetector = () => {
+      if (!('BarcodeDetector' in window)) return () => {}
+      let cancelled = false
       const barcodeDetectionWorker = async () => {
         const w = window as unknown as {
           BarcodeDetector: {
@@ -97,7 +118,7 @@ function Scanner() {
           }
         }
         const barcodeDetector = new w.BarcodeDetector()
-        for (;;) {
+        while (!cancelled) {
           try {
             if (video.current && video.current.videoWidth) {
               const barcodes = await barcodeDetector.detect(video.current)
@@ -115,32 +136,183 @@ function Scanner() {
         }
       }
       barcodeDetectionWorker()
+      return () => {
+        cancelled = true
+      }
     }
-    reader
-      .decodeFromVideoDevice(undefined, video.current!, (result, err) => {
-        if (result) {
-          const data = JSON.parse(JSON.stringify(result))
-          if (data.text) {
-            handleResult(data, 'zxing')
+
+    const startScanner = () => {
+      let cancelled = false
+      reader
+        .decodeFromVideoDevice(currentDeviceId, video.current!, (result, err) => {
+          if (cancelled) return
+          const stream = video.current?.srcObject as MediaStream | null
+          if (stream && streamRef.current !== stream) {
+            streamRef.current = stream
+            const track = stream.getVideoTracks()[0]
+            if (track) {
+              const settings = track.getSettings() as { torch?: boolean }
+              setTorchAvailable(settings?.torch !== undefined)
+              setTorchEnabled(Boolean(settings?.torch))
+            }
+            enumerateCameras()
           }
-        } else if (err instanceof NotFoundException) {
-          // expected
-        } else if (err instanceof ChecksumException) {
-          // expected
-        } else if (err instanceof FormatException) {
-          // expected
-        } else if (err) {
+          if (result) {
+            const data = JSON.parse(JSON.stringify(result))
+            if (data.text) {
+              handleResult(data, 'zxing')
+            }
+          } else if (err instanceof NotFoundException) {
+            // expected
+          } else if (err instanceof ChecksumException) {
+            // expected
+          } else if (err instanceof FormatException) {
+            // expected
+          } else if (err) {
+            console.error(err)
+            showError(err)
+            setStopped(true)
+          }
+        })
+        .catch((err) => {
           console.error(err)
           showError(err)
           setStopped(true)
+        })
+      return () => {
+        cancelled = true
+        resetReader()
+        stopStream()
+      }
+    }
+
+    if (stopped) {
+      resetReader()
+      stopStream()
+      return
+    }
+    const stopBarcode = startBarcodeDetector()
+    const stopScanner = startScanner()
+    return () => {
+      stopBarcode?.()
+      stopScanner?.()
+    }
+  }, [currentDeviceId, stopped])
+
+  const handleTorchToggle = async () => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    if (!track || !torchAvailable) return
+    const enable = !torchEnabled
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: enable } as MediaTrackConstraintSet],
+      } as MediaTrackConstraints)
+      setTorchEnabled(enable)
+    } catch (error) {
+      console.error(error)
+      setDisplayedInfo({
+        text: String(error),
+        variant: 'error',
+      })
+    }
+  }
+
+  const processImageFile = async (file: File) => {
+    let found = false
+    const handleText = (text: string, source: string) => {
+      found = true
+      handleResult({ text }, source)
+    }
+    if ('BarcodeDetector' in window) {
+      try {
+        const bitmap = await createImageBitmap(file)
+        const w = window as unknown as {
+          BarcodeDetector: {
+            new (): {
+              detect(image: ImageBitmapSource): Promise<
+                {
+                  rawValue: string
+                }[]
+              >
+            }
+          }
         }
+        const barcodeDetector = new w.BarcodeDetector()
+        const barcodes = await barcodeDetector.detect(bitmap)
+        for (const barcode of barcodes) {
+          if (barcode.rawValue) handleText(barcode.rawValue, 'native-image')
+        }
+        bitmap.close?.()
+      } catch (error) {
+        console.error('[BarcodeDetector][image]', error)
+      }
+    }
+    if (!found) {
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const objectUrl = URL.createObjectURL(file)
+          const element = new Image()
+          element.onload = () => {
+            URL.revokeObjectURL(objectUrl)
+            resolve(element)
+          }
+          element.onerror = (err) => {
+            URL.revokeObjectURL(objectUrl)
+            reject(err)
+          }
+          element.src = objectUrl
+        })
+        const result = await imageReader.decodeFromImageElement(img)
+        const data = JSON.parse(JSON.stringify(result))
+        if (data?.text) {
+          handleText(data.text, 'zxing-image')
+        }
+      } catch (error) {
+        if (
+          !(error instanceof NotFoundException) &&
+          !(error instanceof ChecksumException) &&
+          !(error instanceof FormatException)
+        ) {
+          console.error('[ZXing][image]', error)
+        }
+      }
+    }
+    if (!found) {
+      setDisplayedInfo({
+        text: 'No QR code found in image',
+        variant: 'error',
       })
-      .catch((err) => {
-        console.error(err)
-        showError(err)
-        setStopped(true)
-      })
-  }, [stopped])
+    }
+  }
+
+  const handleFiles = async (files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        await processImageFile(file)
+      }
+    }
+  }
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items
+      if (!items) return
+      const files: File[] = []
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) files.push(file)
+        }
+      }
+      if (files.length) {
+        event.preventDefault()
+        handleFiles(files)
+      }
+    }
+    const listener: EventListener = onPaste as unknown as EventListener
+    document.addEventListener('paste', listener)
+    return () => document.removeEventListener('paste', listener)
+  }, [])
   return (
     <div>
       {stopped ? (
@@ -153,12 +325,44 @@ function Scanner() {
           </button>
         </div>
       ) : (
-        <video
-          ref={video}
-          className={clsx('fixed top-0 left-0 w-screen h-screen', {
-            'object-cover': options.fit === 'cover',
-          })}
-        />
+        <div
+          className="fixed inset-0"
+          onDragEnter={(event) => {
+            if (event.dataTransfer.items.length) {
+              event.preventDefault()
+              setDragActive(true)
+            }
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+          }}
+          onDragLeave={(event) => {
+            if (
+              event.target === event.currentTarget ||
+              !event.currentTarget.contains(event.relatedTarget as Node)
+            ) {
+              setDragActive(false)
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault()
+            setDragActive(false)
+            if (event.dataTransfer.files.length) {
+              handleFiles(event.dataTransfer.files)
+            }
+          }}
+        >
+          <video
+            ref={video}
+            className={clsx('fixed top-0 left-0 w-screen h-screen', {
+              'object-cover': options.fit === 'cover',
+              'object-contain': options.fit !== 'cover',
+            })}
+            playsInline
+            autoPlay
+            muted
+          />
+        </div>
       )}
 
       {!!displayedInfo && (
@@ -192,6 +396,85 @@ function Scanner() {
           >
             <Icon icon={closeIcon} />
           </button>
+        </div>
+      )}
+
+      {!stopped && (
+        <div className="fixed top-4 right-4 flex flex-col gap-2 items-end">
+          <div className="flex gap-2">
+            {torchAvailable && (
+              <button
+                className={clsx(
+                  'bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80',
+                  torchEnabled && 'bg-amber-500 hover:bg-amber-600',
+                )}
+                onClick={handleTorchToggle}
+                title="Toggle flashlight"
+              >
+                {torchEnabled ? 'Torch on' : 'Torch'}
+              </button>
+            )}
+            <button
+              className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80"
+              onClick={() => fileInput.current?.click()}
+              title="Scan from image"
+            >
+              Upload
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                if (event.target.files) {
+                  handleFiles(event.target.files)
+                  event.target.value = ''
+                }
+              }}
+            />
+            {cameras.length > 1 && (
+              <div className="relative">
+                <button
+                  className="bg-black/60 text-white rounded-full px-3 py-2 backdrop-blur hover:bg-black/80"
+                  onClick={() => setCameraMenuOpen((v) => !v)}
+                  title="Switch camera"
+                >
+                  Camera
+                </button>
+                {cameraMenuOpen && (
+                  <div className="absolute right-0 mt-2 bg-black/80 text-white rounded-lg shadow-lg overflow-hidden min-w-[200px]">
+                    {cameras.map((camera) => (
+                      <button
+                        key={camera.deviceId}
+                        className={clsx(
+                          'block w-full text-left px-4 py-2 hover:bg-white/10',
+                          currentDeviceId === camera.deviceId &&
+                            'bg-white/10 font-semibold',
+                        )}
+                        onClick={() => {
+                          setCameraMenuOpen(false)
+                          setCurrentDeviceId(camera.deviceId)
+                        }}
+                      >
+                        {camera.label || 'Camera'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="text-xs text-white/80 bg-black/40 rounded-full px-3 py-1 backdrop-blur">
+            Tip: drag &amp; drop or paste images to scan
+          </div>
+        </div>
+      )}
+
+      {dragActive && (
+        <div className="fixed inset-0 bg-black/60 text-white flex items-center justify-center pointer-events-none">
+          <div className="text-lg font-semibold">Drop image to scan</div>
         </div>
       )}
     </div>
