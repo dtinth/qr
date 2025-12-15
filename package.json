@@ -11,6 +11,7 @@
   "dependencies": {
     "@iconify-icon/react": "^1.0.2",
     "@iconify-icons/codicon": "^1.2.20",
+    "@iconify-icons/lucide": "^1.2.135",
     "@zxing/browser": "^0.1.1",
     "@zxing/library": "^0.19.1",
     "clsx": "^1.2.1",
